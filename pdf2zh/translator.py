@@ -21,6 +21,14 @@ from tencentcloud.tmt.v20180321.models import (
 )
 from tencentcloud.tmt.v20180321.tmt_client import TmtClient
 
+try:
+    import torch
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+    from IndicTransToolkit import IndicProcessor
+    INDICTRANSTOOLKIT_AVAILABLE = True
+except ImportError:
+    INDICTRANSTOOLKIT_AVAILABLE = False
+
 from pdf2zh.cache import TranslationCache
 from pdf2zh.config import ConfigManager
 
@@ -1076,3 +1084,152 @@ class QwenMtTranslator(OpenAITranslator):
             extra_body={"translation_options": translation_options},
         )
         return response.choices[0].message.content.strip()
+
+
+class IndicTrans2Translator(BaseTranslator):
+    """IndicTrans2 translator using AI4Bharat models for Indic languages
+    
+    Supports all 22 scheduled languages of India with proper Indic scripts.
+    See: https://github.com/AI4Bharat/IndicTrans2
+    """
+    
+    name = "indictrans2"
+    envs = {
+        "INDICTRANS2_MODEL": "ai4bharat/indictrans2-en-indic-1B",
+        "DEVICE": "auto",  # auto, cpu, cuda
+    }
+    CustomPrompt = False
+    
+    # Language code mapping from PDFMathTranslate to IndicTrans2 FLORES codes
+    lang_map = {
+        # English
+        "en": "eng_Latn", "english": "eng_Latn",
+        
+        # Indo-Aryan (Devanagari script)
+        "hi": "hin_Deva", "hindi": "hin_Deva",
+        "mr": "mar_Deva", "marathi": "mar_Deva",
+        "ne": "npi_Deva", "nepali": "npi_Deva",
+        "as": "asm_Beng", "assamese": "asm_Beng",
+        "bn": "ben_Beng", "bengali": "ben_Beng",
+        "gu": "guj_Gujr", "gujarati": "guj_Gujr",
+        "or": "ory_Orya", "odia": "ory_Orya",
+        "pa": "pan_Guru", "punjabi": "pan_Guru",
+        "ur": "urd_Arab", "urdu": "urd_Arab",
+        
+        # Dravidian
+        "te": "tel_Telu", "telugu": "tel_Telu",
+        "ta": "tam_Taml", "tamil": "tam_Taml",
+        "kn": "kan_Knda", "kannada": "kan_Knda",
+        "ml": "mal_Mlym", "malayalam": "mal_Mlym",
+    }
+    
+    def __init__(
+        self,
+        lang_in: str,
+        lang_out: str,
+        model: str = None,
+        envs=None,
+        prompt=None,
+        ignore_cache=False,
+    ):
+        if not INDICTRANSTOOLKIT_AVAILABLE:
+            raise ImportError(
+                "IndicTransToolkit not available. Install with: pip install IndicTransToolkit torch transformers"
+            )
+        
+        self.set_envs(envs)
+        if not model:
+            model = self.envs["INDICTRANS2_MODEL"]
+        
+        super().__init__(lang_in, lang_out, model, ignore_cache)
+        
+        # Convert to FLORES codes
+        self.src_flores = self.lang_map.get(lang_in.lower(), lang_in)
+        self.tgt_flores = self.lang_map.get(lang_out.lower(), lang_out)
+        
+        # Determine device
+        device_str = self.envs.get("DEVICE", "auto")
+        if device_str == "auto":
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device_str
+        
+        # Skip model loading - use IndicTransToolkit API directly
+        self._model = None
+        self._tokenizer = None
+        self._processor = None
+        self.model_name = model
+        
+    def do_translate(self, text: str) -> str:
+        """Translate text using IndicTrans2 via IndicTransToolkit"""
+        try:
+            # Import IndicTransToolkit components
+            from IndicTransToolkit import IndicProcessor
+            import torch
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+            
+            # Use simplified approach - disable model caching temporarily
+            import torch._dynamo
+            torch._dynamo.config.suppress_errors = True
+            
+            # Initialize processor
+            ip = IndicProcessor(inference=True)
+            
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+            
+            # Load model with device_map="cpu" to avoid meta tensor issue
+            model = AutoModelForSeq2SeqLM.from_pretrained(
+                self.model_name,
+                trust_remote_code=True,
+                device_map="cpu",
+                torch_dtype=torch.float32,  # Use float32 for CPU stability
+            )
+            
+            model.eval()
+            
+            # Preprocess
+            batch = ip.preprocess_batch([text], src_lang=self.src_flores, tgt_lang=self.tgt_flores)
+            
+            # Tokenize
+            inputs = tokenizer(
+                batch,
+                truncation=True,
+                padding="longest",
+                return_tensors="pt",
+                return_attention_mask=True,
+            )
+            
+            # Translate
+            with torch.no_grad():
+                generated_tokens = model.generate(
+                    **inputs,
+                    use_cache=True,
+                    min_length=0,
+                    max_length=256,
+                    num_beams=5,
+                    num_return_sequences=1,
+                )
+            
+            # Decode
+            decoded = tokenizer.batch_decode(
+                generated_tokens,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=True,
+            )
+            
+            # Postprocess
+            translated = ip.postprocess_batch(decoded, lang=self.tgt_flores)
+            
+            result = translated[0] if translated else ""
+            
+            # Clean up
+            del model, tokenizer, ip
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"IndicTrans2 translation error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return text

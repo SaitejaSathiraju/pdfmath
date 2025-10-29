@@ -30,6 +30,7 @@ from pdf2zh.translator import (
     GoogleTranslator,
     GrokTranslator,
     GroqTranslator,
+    IndicTrans2Translator,
     ModelScopeTranslator,
     OllamaTranslator,
     OpenAIlikedTranslator,
@@ -160,7 +161,7 @@ class TranslateConverter(PDFConverterEx):
         if not envs:
             envs = {}
         for translator in [GoogleTranslator, BingTranslator, DeepLTranslator, DeepLXTranslator, OllamaTranslator, XinferenceTranslator, AzureOpenAITranslator,
-                           OpenAITranslator, ZhipuTranslator, ModelScopeTranslator, SiliconTranslator, GeminiTranslator, AzureTranslator, TencentTranslator, DifyTranslator, AnythingLLMTranslator, ArgosTranslator, GrokTranslator, GroqTranslator, DeepseekTranslator, OpenAIlikedTranslator, QwenMtTranslator, X302AITranslator]:
+                           OpenAITranslator, ZhipuTranslator, ModelScopeTranslator, SiliconTranslator, GeminiTranslator, AzureTranslator, TencentTranslator, DifyTranslator, AnythingLLMTranslator, ArgosTranslator, GrokTranslator, GroqTranslator, DeepseekTranslator, OpenAIlikedTranslator, QwenMtTranslator, X302AITranslator, IndicTrans2Translator]:
             if service_name == translator.name:
                 self.translator = translator(lang_in, lang_out, service_model, envs=envs, prompt=prompt, ignore_cache=ignore_cache)
         if not self.translator:
@@ -366,7 +367,19 @@ class TranslateConverter(PDFConverterEx):
         # C. 新文档排版
         def raw_string(fcur: str, cstk: str):  # 编码字符串
             if fcur == self.noto_name:
-                return "".join(["%04x" % self.noto.has_glyph(ord(c)) for c in cstk])
+                # Always use glyph IDs - font expects glyph IDs, not Unicode code points
+                # This works for Hindi, Telugu, and all Indic scripts when font has proper glyphs
+                result = []
+                for c in cstk:
+                    char_code = ord(c)
+                    glyph_id = self.noto.has_glyph(char_code)
+                    # has_glyph returns glyph ID (>0) if found, otherwise 0 or raises
+                    if glyph_id and glyph_id > 0:
+                        result.append("%04x" % glyph_id)
+                    else:
+                        # Fallback: use Unicode as last resort (may not render correctly)
+                        result.append("%04x" % char_code)
+                return "".join(result)
             elif isinstance(self.fontmap[fcur], PDFCIDFont):  # 判断编码长度
                 return "".join(["%04x" % ord(c) for c in cstk])
             else:

@@ -414,6 +414,58 @@ def download_remote_fonts(lang: str):
     }
     font_name = LANG_NAME_MAP.get(lang, "GoNotoKurrent-Regular.ttf")
 
+    # Special handling for Telugu - GoNotoKurrent may not have proper Telugu shaping
+    # Try to use NotoSansTelugu if available, otherwise fall back to GoNotoKurrent
+    if lang == "te":
+        # Try to find NotoSansTelugu fonts (regular or variable)
+        telugu_font_names = [
+            "NotoSansTelugu-Regular.ttf",
+            "NotoSansTelugu.ttf",
+            "NotoSansTelugu-VariableFont_wdth,wght.ttf",  # Variable font
+            "NotoSansTelugu-*.ttf",  # Any Telugu font variant
+        ]
+        
+        # Check cache folder first (most likely location)
+        cache_font_dir = Path.home() / ".cache" / "babeldoc" / "fonts"
+        if cache_font_dir.exists():
+            for telugu_pattern in telugu_font_names:
+                if "*" in telugu_pattern:
+                    # Pattern matching
+                    import glob
+                    matches = list(cache_font_dir.glob(telugu_pattern))
+                    if matches:
+                        font_path = matches[0]
+                        logger.info(f"Using Telugu-specific font: {font_path}")
+                        return font_path.as_posix()
+                else:
+                    # Exact match
+                    font_path = cache_font_dir / telugu_pattern
+                    if font_path.exists():
+                        logger.info(f"Using Telugu-specific font: {font_path}")
+                        return font_path.as_posix()
+        
+        # Try other locations
+        for telugu_font in telugu_font_names:
+            if "*" in telugu_font:
+                continue
+            try:
+                # Check if it exists via get_font_and_metadata
+                telugu_path, _ = get_font_and_metadata(telugu_font)
+                if telugu_path and Path(telugu_path).exists():
+                    logger.info(f"Using Telugu-specific font: {telugu_path}")
+                    return telugu_path.as_posix()
+            except Exception:
+                # Try local paths
+                local_paths = [
+                    Path(__file__).parent / telugu_font,
+                    Path(__file__).parent.parent / telugu_font,
+                ]
+                for local_path in local_paths:
+                    if local_path.exists():
+                        logger.info(f"Using local Telugu font: {local_path}")
+                        return local_path.as_posix()
+        logger.warning(f"Telugu-specific font not found, using GoNotoKurrent (may have shaping issues)")
+
     # docker
     font_path = ConfigManager.get("NOTO_FONT_PATH", Path("/app", font_name).as_posix())
     if not Path(font_path).exists():
