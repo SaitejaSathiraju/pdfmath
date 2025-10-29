@@ -1,0 +1,4 @@
+playwright>=1.40.0
+uharfbuzz>=0.31.0
+fonttools>=4.0.0
+reportlab>=4.0
