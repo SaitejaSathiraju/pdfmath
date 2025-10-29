@@ -417,11 +417,11 @@ def download_remote_fonts(lang: str):
     # Special handling for Telugu - GoNotoKurrent may not have proper Telugu shaping
     # Try to use NotoSansTelugu if available, otherwise fall back to GoNotoKurrent
     if lang == "te":
-        # Try to find NotoSansTelugu fonts (regular or variable)
+        # Try to find NotoSansTelugu fonts (prefer static Regular, fallback to variable)
         telugu_font_names = [
-            "NotoSansTelugu-Regular.ttf",
+            "NotoSansTelugu-Regular.ttf",  # Static Regular - BEST for PDF rendering
             "NotoSansTelugu.ttf",
-            "NotoSansTelugu-VariableFont_wdth,wght.ttf",  # Variable font
+            "NotoSansTelugu-VariableFont_wdth,wght.ttf",  # Variable font (may not work)
             "NotoSansTelugu-*.ttf",  # Any Telugu font variant
         ]
         

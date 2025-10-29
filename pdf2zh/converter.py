@@ -367,19 +367,11 @@ class TranslateConverter(PDFConverterEx):
         # C. 新文档排版
         def raw_string(fcur: str, cstk: str):  # 编码字符串
             if fcur == self.noto_name:
-                # Always use glyph IDs - font expects glyph IDs, not Unicode code points
-                # This works for Hindi, Telugu, and all Indic scripts when font has proper glyphs
-                result = []
-                for c in cstk:
-                    char_code = ord(c)
-                    glyph_id = self.noto.has_glyph(char_code)
-                    # has_glyph returns glyph ID (>0) if found, otherwise 0 or raises
-                    if glyph_id and glyph_id > 0:
-                        result.append("%04x" % glyph_id)
-                    else:
-                        # Fallback: use Unicode as last resort (may not render correctly)
-                        result.append("%04x" % char_code)
-                return "".join(result)
+                # MUST use Unicode code points (ord(c)), not glyph IDs.
+                # The font shaping (combining gunintaalu/vowel marks) is handled 
+                # by the PDF viewer when the correct Unicode is present.
+                # Using glyph IDs breaks Indic script shaping (Telugu, Tamil, etc.)
+                return "".join(["%04x" % ord(c) for c in cstk])
             elif isinstance(self.fontmap[fcur], PDFCIDFont):  # 判断编码长度
                 return "".join(["%04x" % ord(c) for c in cstk])
             else:
